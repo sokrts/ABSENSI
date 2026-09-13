@@ -1,6 +1,6 @@
 import base64
 from datetime import datetime, timedelta
-import pytz  # Tambahkan baris ini
+import pytz  # Tambahkan import pytz untuk mengatur zona waktu
 import sqlite3
 import pandas as pd
 import streamlit as st
@@ -70,13 +70,14 @@ def cek_karyawan(uid):
 
 
 def catat_absen(uid, nama):
+    # --- PERBAIKAN ZONA WAKTU KE WIB (Asia/Jakarta) ---
     tz = pytz.timezone('Asia/Jakarta')
-    sekarang = datetime.now(tz)
+    # Ambil waktu WIB, jadikan "naive" (hilangkan label tz) agar tidak error saat dikurangi dengan waktu di SQLite
+    sekarang = datetime.now(tz).replace(tzinfo=None) 
     
     waktu_sekarang_str = sekarang.strftime("%Y-%m-%d %H:%M:%S")
     jam_sekarang_str = sekarang.strftime("%H:%M:%S")
     tanggal_hari_ini = sekarang.strftime("%Y-%m-%d")
-    
 
     conn = sqlite3.connect('data_absensi.db')
     c = conn.cursor()
@@ -324,11 +325,15 @@ elif menu == "Registrasi Karyawan":
 elif menu == "Laporan Absensi":
     st.subheader("Data Laporan Absensi")
 
+    # --- PERBAIKAN ZONA WAKTU DI KALENDER LAPORAN ---
+    tz = pytz.timezone('Asia/Jakarta')
+    today_local = datetime.now(tz).date()
+
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("Dari Tanggal", datetime.now().date())
+        start_date = st.date_input("Dari Tanggal", today_local)
     with col2:
-        end_date = st.date_input("Sampai Tanggal", datetime.now().date())
+        end_date = st.date_input("Sampai Tanggal", today_local)
 
     if start_date > end_date:
         st.error(" Error: 'Dari Tanggal' tidak boleh melebihi 'Sampai Tanggal'.")
