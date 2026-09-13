@@ -1,5 +1,6 @@
 import base64
 from datetime import datetime, timedelta
+import pytz  # Tambahkan baris ini
 import sqlite3
 import pandas as pd
 import streamlit as st
@@ -69,10 +70,13 @@ def cek_karyawan(uid):
 
 
 def catat_absen(uid, nama):
-    sekarang = datetime.now()
+    tz = pytz.timezone('Asia/Jakarta')
+    sekarang = datetime.now(tz)
+    
     waktu_sekarang_str = sekarang.strftime("%Y-%m-%d %H:%M:%S")
     jam_sekarang_str = sekarang.strftime("%H:%M:%S")
     tanggal_hari_ini = sekarang.strftime("%Y-%m-%d")
+    
 
     conn = sqlite3.connect('data_absensi.db')
     c = conn.cursor()
