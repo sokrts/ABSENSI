@@ -1,6 +1,6 @@
 import base64
 from datetime import datetime, timedelta
-import pytz  # Tambahkan import pytz untuk mengatur zona waktu
+import pytz  # Untuk mengatur zona waktu
 import sqlite3
 import pandas as pd
 import streamlit as st
@@ -70,9 +70,8 @@ def cek_karyawan(uid):
 
 
 def catat_absen(uid, nama):
-    # --- PERBAIKAN ZONA WAKTU KE WIB (Asia/Jakarta) ---
+    # --- ZONA WAKTU WIB (Asia/Jakarta) ---
     tz = pytz.timezone('Asia/Jakarta')
-    # Ambil waktu WIB, jadikan "naive" (hilangkan label tz) agar tidak error saat dikurangi dengan waktu di SQLite
     sekarang = datetime.now(tz).replace(tzinfo=None) 
     
     waktu_sekarang_str = sekarang.strftime("%Y-%m-%d %H:%M:%S")
@@ -82,7 +81,6 @@ def catat_absen(uid, nama):
     conn = sqlite3.connect('data_absensi.db')
     c = conn.cursor()
 
-    # Cek apakah karyawan ini sedang memiliki sesi aktif (jam_pulang masih '-') dalam 24 jam terakhir
     ambang_batas_cek = (sekarang - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
 
     c.execute('''
@@ -100,29 +98,20 @@ def catat_absen(uid, nama):
         selisih_waktu = sekarang - waktu_masuk
 
         if selisih_waktu < timedelta(hours=1):
-            # --- ATURAN 1: KURANG DARI 1 JAM (KOREKSI JAM MASUK) ---
             c.execute('''
-            UPDATE log_absensi
-            SET jam_masuk = ?
-            WHERE id = ?
+            UPDATE log_absensi SET jam_masuk = ? WHERE id = ?
             ''', (waktu_sekarang_str, id_log))
             pesan = f"⚠️ Koreksi Jam Masuk! Jam masuk **{nama}** diperbarui ke {jam_sekarang_str}."
 
         elif selisih_waktu <= timedelta(hours=14):
-            # --- ATURAN 2: ANTARA 1 JAM SAMPAI 14 JAM (DIANGGAP JAM PULANG) ---
             c.execute('''
-            UPDATE log_absensi
-            SET jam_pulang = ?, status = ?
-            WHERE id = ?
+            UPDATE log_absensi SET jam_pulang = ?, status = ? WHERE id = ?
             ''', (waktu_sekarang_str, "Hadir & Pulang", id_log))
             pesan = f" Berhasil Absen **PULANG**! Hati-hati di jalan, **{nama}**."
 
         else:
-            # --- ATURAN 3: LEBIH DARI 14 JAM TANPA PULANG (ALPHA) ---
             c.execute('''
-            UPDATE log_absensi
-            SET jam_pulang = 'Tidak Absen Pulang', status = ?
-            WHERE id = ?
+            UPDATE log_absensi SET jam_pulang = 'Tidak Absen Pulang', status = ? WHERE id = ?
             ''', ("Alpha / Lupa Pulang", id_log))
 
             c.execute('''
@@ -134,7 +123,6 @@ def catat_absen(uid, nama):
 
     else:
         tanggal_kerja = tanggal_hari_ini
-
         c.execute('''
         SELECT id FROM log_absensi WHERE uid_rfid = ? AND tanggal = ? AND jam_pulang != '-'
         ''', (uid, tanggal_kerja))
@@ -156,7 +144,6 @@ def catat_absen(uid, nama):
 
 def get_laporan_satu_tabel(start_date, end_date):
     conn = sqlite3.connect('data_absensi.db')
-
     query = '''
     SELECT
         uid_rfid AS 'UID RFID',
@@ -171,8 +158,41 @@ def get_laporan_satu_tabel(start_date, end_date):
     '''
     df = pd.read_sql_query(query, conn, params=(start_date, end_date))
     conn.close()
-
     return df
+
+
+def get_semua_karyawan():
+    conn = sqlite3.connect('data_absensi.db')
+    df = pd.read_sql_query("SELECT * FROM karyawan", conn)
+    conn.close()
+    return df
+
+
+def hapus_data_karyawan(uid):
+    conn = sqlite3.connect('data_absensi.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM karyawan WHERE uid_rfid = ?", (uid,))
+    conn.commit()
+    conn.close()
+
+
+def hapus_data_log(id_log):
+    conn = sqlite3.connect('data_absensi.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM log_absensi WHERE id = ?", (id_log,))
+    conn.commit()
+    conn.close()
+
+
+def edit_data_karyawan(uid, nama_baru, divisi_baru):
+    conn = sqlite3.connect('data_absensi.db')
+    c = conn.cursor()
+    # Update di tabel karyawan
+    c.execute("UPDATE karyawan SET nama = ?, divisi = ? WHERE uid_rfid = ?", (nama_baru, divisi_baru, uid))
+    # Update juga nama di tabel log_absensi agar riwayat absen menyesuaikan jika ada typo nama sebelumnya
+    c.execute("UPDATE log_absensi SET nama = ? WHERE uid_rfid = ?", (nama_baru, uid))
+    conn.commit()
+    conn.close()
 
 
 def get_image_base64(path):
@@ -187,7 +207,6 @@ def get_image_base64(path):
 # ==========================================
 # 3. ANTARMUKA STREAMLIT (UI)
 # ==========================================
-# initial_sidebar_state="collapsed" membuat sidebar otomatis tertutup saat pertama kali dibuka
 st.set_page_config(page_title="Sistem Absensi RFID", layout="centered", initial_sidebar_state="collapsed")
 
 # --- INJEKSI CSS ---
@@ -219,11 +238,9 @@ h1, h2, h3, p, .stMarkdown {
     display: flex;
     justify-content: center;
 }
-
-/* --- Mengubah warna font Tombol Download menjadi Hitam --- */
 [data-testid="stDownloadButton"] button {
-    background-color: #f0f2f6; /* Warna latar tombol */
-    color: black !important; /* Teks menjadi hitam */
+    background-color: #f0f2f6; 
+    color: black !important; 
     border: 1px solid #d6d6d6;
 }
 [data-testid="stDownloadButton"] button p {
@@ -248,12 +265,10 @@ header_clock_html = f"""
         <h2 style="color: #DAA520; font-size: 22px; font-weight: 600; margin: 0; padding: 0; line-height: 1.3; margin-top: 4px; text-shadow: 1px 1px 2px rgba(0,0,0,0.1);">KELAPA KACUNG</h2>
     </div>
 </div>
-
 <div style="text-align: center; font-family: sans-serif; color: white; margin-top: 15px; margin-bottom: 15px;">
     <div id="date" style="font-size: 22px; font-weight: 500; margin-bottom: 5px;"></div>
     <div id="time" style="font-size: 75px; font-weight: bold; letter-spacing: 3px;"></div>
 </div>
-
 <script>
 function updateClock() {{
     var now = new Date();
@@ -271,8 +286,8 @@ updateClock();
 
 components.html(header_clock_html, height=270)
 
-# Menu Navigasi di Sidebar (Sidebar kini otomatis tertutup saat aplikasi dibuka)
-menu = st.sidebar.selectbox("Pilih Menu", ["Mode Absensi", "Registrasi Karyawan", "Laporan Absensi"])
+# Menu Navigasi di Sidebar
+menu = st.sidebar.selectbox("Pilih Menu", ["Mode Absensi", "Registrasi Karyawan", "Laporan Absensi", "Manajemen Data"])
 
 # --- MENU: MODE ABSENSI ---
 if menu == "Mode Absensi":
@@ -297,17 +312,7 @@ elif menu == "Registrasi Karyawan":
         nama_baru = st.text_input("Nama Lengkap Karyawan:")
         divisi_baru = st.selectbox(
             "Divisi / Bagian:",
-            [
-                "Asisten Lapangan",
-                "Chef",
-                "Persiapan",
-                "Pengolahan",
-                "Pemorsian",
-                "Distribusi",
-                "Cuci Ompreng",
-                "CS",
-                "Satpam",
-            ]
+            ["Asisten Lapangan", "Chef", "Persiapan", "Pengolahan", "Pemorsian", "Distribusi", "Cuci Ompreng", "CS", "Satpam"]
         )
         submit_registrasi = st.form_submit_button("Simpan Data")
 
@@ -325,7 +330,6 @@ elif menu == "Registrasi Karyawan":
 elif menu == "Laporan Absensi":
     st.subheader("Data Laporan Absensi")
 
-    # --- PERBAIKAN ZONA WAKTU DI KALENDER LAPORAN ---
     tz = pytz.timezone('Asia/Jakarta')
     today_local = datetime.now(tz).date()
 
@@ -355,3 +359,98 @@ elif menu == "Laporan Absensi":
             )
         else:
             st.info("Belum ada data absensi pada rentang tanggal tersebut.")
+
+# --- MENU: MANAJEMEN DATA (EDIT & HAPUS DATA) ---
+elif menu == "Manajemen Data":
+    st.subheader("Manajemen Database")
+    
+    # Menambahkan tab Edit Karyawan
+    tab1, tab2, tab3 = st.tabs(["✏️ Edit Karyawan", "👥 Hapus Karyawan", "🗑️ Hapus Log Absensi"])
+    
+    # --- TAB 1: EDIT KARYAWAN ---
+    with tab1:
+        st.write("### Edit Data Karyawan")
+        df_karyawan = get_semua_karyawan()
+        
+        if not df_karyawan.empty:
+            st.dataframe(df_karyawan, use_container_width=True)
+            st.write("---")
+            
+            opsi_karyawan = df_karyawan['uid_rfid'] + " - " + df_karyawan['nama']
+            pilih_edit = st.selectbox("Pilih Karyawan yang akan diedit:", opsi_karyawan, key="select_edit")
+            
+            uid_edit = pilih_edit.split(" - ")[0]
+            data_saat_ini = df_karyawan[df_karyawan['uid_rfid'] == uid_edit].iloc[0]
+            
+            with st.form("form_edit_karyawan"):
+                nama_baru = st.text_input("Nama Lengkap:", value=data_saat_ini['nama'])
+                
+                list_divisi = ["Asisten Lapangan", "Chef", "Persiapan", "Pengolahan", "Pemorsian", "Distribusi", "Cuci Ompreng", "CS", "Satpam"]
+                
+                # Mencegah error jika divisi sebelumnya dihapus/tidak ada di list default
+                try:
+                    index_div = list_divisi.index(data_saat_ini['divisi'])
+                except ValueError:
+                    index_div = 0
+                    
+                divisi_baru = st.selectbox("Divisi / Bagian:", list_divisi, index=index_div)
+                
+                submit_edit = st.form_submit_button("Simpan Perubahan Data")
+                
+                if submit_edit:
+                    if not nama_baru:
+                        st.warning("⚠️ Nama tidak boleh kosong!")
+                    else:
+                        edit_data_karyawan(uid_edit, nama_baru, divisi_baru)
+                        st.success(f"✅ Data karyawan berhasil diperbarui menjadi: **{nama_baru}** ({divisi_baru})")
+                        st.rerun()
+        else:
+            st.info("Belum ada data karyawan terdaftar.")
+
+    # --- TAB 2: HAPUS KARYAWAN ---
+    with tab2:
+        st.write("### Hapus Data Karyawan")
+        df_karyawan = get_semua_karyawan()
+        
+        if not df_karyawan.empty:
+            st.dataframe(df_karyawan, use_container_width=True)
+            st.write("---")
+            
+            opsi_karyawan = df_karyawan['uid_rfid'] + " - " + df_karyawan['nama']
+            pilih_karyawan = st.selectbox("Pilih Karyawan yang akan dihapus:", opsi_karyawan, key="select_hapus")
+            
+            if st.button("Hapus Karyawan", type="primary"):
+                uid_hapus = pilih_karyawan.split(" - ")[0] 
+                hapus_data_karyawan(uid_hapus)
+                st.success(f"✅ Karyawan dengan UID {uid_hapus} berhasil dihapus!")
+                st.rerun() 
+        else:
+            st.info("Belum ada data karyawan terdaftar.")
+
+    # --- TAB 3: HAPUS LOG ABSENSI ---
+    with tab3:
+        st.write("### Daftar Log Absensi")
+        
+        conn = sqlite3.connect('data_absensi.db')
+        df_log_full = pd.read_sql_query(
+            "SELECT id, uid_rfid, nama, tanggal, jam_masuk, jam_pulang, status FROM log_absensi ORDER BY id DESC LIMIT 100", 
+            conn
+        )
+        conn.close()
+
+        if not df_log_full.empty:
+            st.dataframe(df_log_full, use_container_width=True)
+            st.write("---")
+            
+            st.write("**Hapus Log Absensi Berdasarkan ID**")
+            id_hapus = st.number_input("Masukkan ID Log yang ingin dihapus:", min_value=0, step=1)
+            
+            if st.button("Hapus Log Absensi", type="primary"):
+                if id_hapus in df_log_full['id'].values:
+                    hapus_data_log(id_hapus)
+                    st.success(f"✅ Log absensi dengan ID {id_hapus} berhasil dihapus!")
+                    st.rerun() 
+                else:
+                    st.error("❌ ID tidak ditemukan atau sudah dihapus.")
+        else:
+            st.info("Belum ada data log absensi.")
